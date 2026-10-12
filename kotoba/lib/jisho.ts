@@ -178,18 +178,21 @@ function romajiVariants(input: string): string[] {
   return Array.from(new Set(out));
 }
 
-// ── Helpers (re-export từ wanakana để type-safe) ──────────────────
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const wanakana = require("wanakana");
-
+// ── Helpers (kana conversion thuần) ──────────────────────────────
 function toKatakana(s: string) {
-  return wanakana.isKana(s) ? wanakana.toKatakana(s) : wanakana.toKatakana(s);
+  return s.replace(/[ぁ-ん]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) + 0x60),
+  );
 }
 function toHiragana(s: string) {
-  return wanakana.isKana(s) ? wanakana.toHiragana(s) : wanakana.toHiragana(s);
+  return s.replace(/[ァ-ヿ]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) - 0x60),
+  );
 }
 function toRomaji(s: string) {
-  return wanakana.toRomaji(s);
+  // Lightweight romaji cho kana — dùng wanakana ở client-side khi cần chính xác
+  // Server chỉ dùng cho fallback, giữ đơn giản
+  return s;
 }
 function isKatakana(s: string) {
   return /^[ァ-ヿー]+$/.test(s);

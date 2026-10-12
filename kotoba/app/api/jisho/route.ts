@@ -106,19 +106,16 @@ function pickBest(entries: JishoEntry[]) {
 }
 
 // Lazy-loaded wanakana (giữ bundle server nhỏ)
-let wk: typeof import("wanakana") | null = null;
-async function getWanakana() {
-  if (!wk) wk = await import("wanakana");
-  return wk;
-}
 
-async function toKatakana(s: string) {
-  const w = await getWanakana();
-  return w.toKatakana(s);
+function toKatakana(s: string) {
+  return s.replace(/[ぁ-ん]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) + 0x60),
+  );
 }
-async function toHiragana(s: string) {
-  const w = await getWanakana();
-  return w.toHiragana(s);
+function toHiragana(s: string) {
+  return s.replace(/[ァ-ヿ]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) - 0x60),
+  );
 }
 
 export async function GET(req: NextRequest) {
