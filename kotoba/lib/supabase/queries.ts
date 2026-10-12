@@ -577,7 +577,16 @@ export async function logAttempts(
 ): Promise<void> {
   if (rows.length === 0) return;
   const sb = getSupabase();
-  const { error } = await sb.from("attempts").insert(rows);
+  // Bảng attempts dùng snake_case columns (item_id, answer_ms) — convert
+  const payload = rows.map((r) => ({
+    mode: r.mode,
+    item_id: r.itemId,
+    question: r.question,
+    correct: r.correct,
+    answer_ms: r.answerMs ?? null,
+    combo: r.combo,
+  }));
+  const { error } = await sb.from("attempts").insert(payload);
   if (error) {
     // Không chặn luồng học nếu log lỗi
     console.warn("logAttempts failed:", error.message);
