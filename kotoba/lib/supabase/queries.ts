@@ -120,6 +120,78 @@ export async function insertVocab(rows: NewVocab[]): Promise<Vocab[]> {
   return (data ?? []) as Vocab[];
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  Dedupe — chống trùng từ khi nhập hàng loạt
+// ═══════════════════════════════════════════════════════════════
+
+/** Chuẩn hoá key để so trùng: bỏ whitespace, lowercase, bỏ dấu */
+export function dedupeKey(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu thanh tiếng Việt
+    .replace(/\s+/g, "");
+}
+
+/** So 2 từ có coi là trùng không. */
+export function isVocabDuplicate(a: NewVocab, b: Vocab): boolean {
+  // Ưu tiên so romaji (canonical), fallback hiragana/katakana
+  const ra = dedupeKey(a.romaji);
+  const rb = dedupeKey(b.romaji);
+  if (ra && rb && ra === rb) return true;
+  const ha = dedupeKey(a.hiragana);
+  const hb = dedupeKey(b.hiragana);
+  if (ha && hb && ha === hb) return true;
+  const ka = dedupeKey(a.katakana);
+  const kb = dedupeKey(b.katakana);
+  if (ka && kb && ka === kb) return true;
+  return false;
+}
+
+/** Lọc trùng trong tập rows (so sánh nội bộ trước khi đụng DB) */
+export function dedupeVocabWithin(rows: NewVocab[]): {
+  unique: NewVocab[];
+  duplicates: Array<{ kept: NewVocab; dropped: NewVocab }>;
+} {
+  const seen: NewVocab[] = [];
+  const duplicates: Array<{ kept: NewVocab; dropped: NewVocab }> = [];
+  for (const r of rows) {
+    const dup = seen.find((s) => isVocabDuplicate(s, r as Vocab));
+    if (dup) {
+      duplicates.push({ kept: dup, dropped: r });
+    } else {
+      seen.push(r);
+    }
+  }
+  return { unique: seen, duplicates };
+}
+
+/** Lọc trùng so với DB — giữ lại từ chưa có */
+export async function filterVocabAgainstDB(
+  rows: NewVocab[],
+): Promise<{ unique: NewVocab[]; duplicates: Array<{ incoming: NewVocab; existing: Vocab }> }> {
+  if (rows.length === 0) return { unique: [], duplicates: [] };
+  const sb = getSupabase();
+  // Lấy tất cả romaji + hiragana + katakana đang có (chỉ cần 3 cột này)
+  const { data: existing, error } = await sb
+    .from("vocab")
+    .select("id, romaji, hiragana, katakana, meaning_vi, lesson_number, study_date, created_at");
+  if (error) {
+    // Lỗi → trả về nguyên (không chặn user)
+    return { unique: rows, duplicates: [] };
+  }
+  const list = (existing ?? []) as Vocab[];
+  const unique: NewVocab[] = [];
+  const duplicates: Array<{ incoming: NewVocab; existing: Vocab }> = [];
+  for (const r of rows) {
+    const dup = list.find((b) => isVocabDuplicate(r, b));
+    if (dup) duplicates.push({ incoming: r, existing: dup });
+    else unique.push(r);
+  }
+  return { unique, duplicates };
+}
+
 export async function getVocabByDate(date: string): Promise<Vocab[]> {
   const sb = getSupabase();
   const { data, error } = await sb
@@ -281,6 +353,44 @@ export interface NewKanji {
   note?: string | null;
   lesson_number?: number;
   study_date?: string;
+}
+
+/** Lọc trùng kanji trong chính tập rows (so sánh character). */
+export function dedupeKanjiWithin(rows: NewKanji[]): {
+  unique: NewKanji[];
+  duplicates: Array<{ kept: NewKanji; dropped: NewKanji }>;
+} {
+  const seen = new Map<string, NewKanji>();
+  const duplicates: Array<{ kept: NewKanji; dropped: NewKanji }> = [];
+  for (const r of rows) {
+    const key = r.character.trim();
+    if (!key) continue;
+    if (seen.has(key)) {
+      duplicates.push({ kept: seen.get(key)!, dropped: r });
+    } else {
+      seen.set(key, r);
+    }
+  }
+  return { unique: Array.from(seen.values()), duplicates };
+}
+
+/** Lọc trùng kanji so với DB theo `character` (đã unique trong schema). */
+export async function filterKanjiAgainstDB(
+  rows: NewKanji[],
+): Promise<{ unique: NewKanji[]; duplicates: Array<{ incoming: NewKanji; existing: Kanji }> }> {
+  if (rows.length === 0) return { unique: [], duplicates: [] };
+  const sb = getSupabase();
+  const { data: existing, error } = await sb
+    .from("kanji")
+    .select("id, character, meaning_vi, onyomi, kunyomi, stroke_count, note, lesson_number, study_date, created_at");
+  if (error) return { unique: rows, duplicates: [] };
+  const list = (existing ?? []) as Kanji[];
+  const existingSet = new Set(list.map((k) => k.character.trim()));
+  const unique = rows.filter((r) => !existingSet.has(r.character.trim()));
+  const duplicates = rows
+    .filter((r) => existingSet.has(r.character.trim()))
+    .map((r) => ({ incoming: r, existing: list.find((k) => k.character.trim() === r.character.trim())! }));
+  return { unique, duplicates };
 }
 
 export async function insertKanji(rows: NewKanji[]): Promise<Kanji[]> {

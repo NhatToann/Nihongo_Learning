@@ -9,7 +9,12 @@ import {
   withReading,
   type ParsedWord,
 } from "@/lib/romaji";
-import { insertVocab, type NewVocab } from "@/lib/supabase/queries";
+import {
+  insertVocab,
+  dedupeVocabWithin,
+  filterVocabAgainstDB,
+  type NewVocab,
+} from "@/lib/supabase/queries";
 import { ErrorNote, Toast } from "./ui";
 import { useJishoLookup, type JishoHit } from "@/hooks/use-jisho-lookup";
 
@@ -142,12 +147,38 @@ export function VocabInputForm({
 
     startTransition(async () => {
       try {
-        await insertVocab(rows);
+        // Bước 1: dedupe nội bộ (trùng romaji trong cùng 1 lần nhập)
+        const internal = dedupeVocabWithin(rows);
+        const internalDupes = internal.duplicates;
+
+        // Bước 2: dedupe với DB (đã có sẵn → bỏ qua, không tạo bản sao)
+        const { unique: toInsert, duplicates: dbDupes } =
+          await filterVocabAgainstDB(internal.unique);
+
+        if (toInsert.length > 0) {
+          await insertVocab(toInsert);
+        }
+
+        // Kết quả
+        const skipped = internalDupes.length + dbDupes.length;
         setRaw("");
         setReadings({});
-        setToast(`Đã lưu ${rows.length} từ ✨`);
+        if (toInsert.length > 0 && skipped === 0) {
+          setToast(`Đã lưu ${toInsert.length} từ ✨`);
+        } else if (toInsert.length > 0 && skipped > 0) {
+          setToast(
+            `Đã lưu ${toInsert.length} từ · bỏ qua ${skipped} từ trùng`,
+          );
+        } else if (toInsert.length === 0 && skipped > 0) {
+          setError(
+            `Tất cả ${skipped} từ đã có sẵn trong bộ từ điển — không thêm bản sao.`,
+          );
+          onSaved?.();
+          setTimeout(() => setError(null), 4000);
+          return;
+        }
         onSaved?.();
-        setTimeout(() => setToast(null), 2600);
+        setTimeout(() => setToast(null), 3200);
       } catch (e) {
         setError(
           e instanceof Error ? e.message : "Lỗi khi lưu. Kiểm tra kết nối Supabase.",

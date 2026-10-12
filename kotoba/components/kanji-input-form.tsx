@@ -3,7 +3,12 @@
 import { motion } from "framer-motion";
 import { useMemo, useState, useTransition } from "react";
 import { toKatakana } from "wanakana";
-import { insertKanji, type NewKanji } from "@/lib/supabase/queries";
+import {
+  insertKanji,
+  dedupeKanjiWithin,
+  filterKanjiAgainstDB,
+  type NewKanji,
+} from "@/lib/supabase/queries";
 import { ErrorNote, Toast } from "./ui";
 
 // ═══════════════════════════════════════════════════════════════
@@ -96,11 +101,33 @@ export function KanjiInputForm({
 
     startTransition(async () => {
       try {
-        await insertKanji(rows);
+        // Dedup nội bộ (cùng character trong 1 lần nhập)
+        const internal = dedupeKanjiWithin(rows);
+        // Dedup với DB (đã có sẵn)
+        const { unique: toInsert, duplicates: dbDupes } =
+          await filterKanjiAgainstDB(internal.unique);
+
+        if (toInsert.length > 0) {
+          await insertKanji(toInsert);
+        }
+        const skipped = internal.duplicates.length + dbDupes.length;
         setRaw("");
-        setToast(`Đã lưu ${rows.length} kanji 🈶`);
+        if (toInsert.length > 0 && skipped === 0) {
+          setToast(`Đã lưu ${toInsert.length} kanji 🈶`);
+        } else if (toInsert.length > 0 && skipped > 0) {
+          setToast(
+            `Đã lưu ${toInsert.length} kanji · bỏ qua ${skipped} kanji trùng`,
+          );
+        } else if (toInsert.length === 0 && skipped > 0) {
+          setError(
+            `Tất cả ${skipped} kanji đã có sẵn — không thêm bản sao.`,
+          );
+          onSaved?.();
+          setTimeout(() => setError(null), 4000);
+          return;
+        }
         onSaved?.();
-        setTimeout(() => setToast(null), 2600);
+        setTimeout(() => setToast(null), 3200);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Lỗi khi lưu.");
       }
