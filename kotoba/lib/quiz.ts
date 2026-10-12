@@ -7,6 +7,7 @@ import type {
   Vocab,
 } from "@/lib/types";
 import { jpEquals, normalizeAnswer } from "@/lib/romaji";
+import { pickSmartDistractors } from "./distractor";
 
 // ═══════════════════════════════════════════════════════════════
 //  Shuffle helpers (Fisher–Yates, deterministic khi có seed)
@@ -93,16 +94,35 @@ export function buildQuestion(
 
   const id = `${kind}:${item.id}`;
 
-  // Chọn 3 đáp án sai khác item
+  // Chọn 3 đáp án sai THÔNG MINH: cùng loại từ, gần nghĩa nhưng không trùng
+  const correctAnswer = answerValueFor(item, kind);
+  const distractorMode: "meaning" | "japanese" =
+    kind === "vi2jp" || kind === "vi2kanji" || kind === "kanji2reading" ? "japanese" : "meaning";
+
+  const smartDistractors = pickSmartDistractors(
+    item,
+    correctAnswer,
+    pool,
+    (p) => answerValueFor(p, kind),
+    distractorMode,
+    3,
+  );
+
+  // Fallback nếu pool cạn: dùng lọc cũ
   const wrongPool = pool.filter(
     (p) =>
       p.id !== item.id &&
-      answerValueFor(p, kind) !== answerValueFor(item, kind),
+      answerValueFor(p, kind) !== correctAnswer,
   );
-  const distractors = sample(wrongPool, 3).map((p) => answerValueFor(p, kind));
+  const fallback = smartDistractors.length < 3
+    ? wrongPool.filter((p) => !smartDistractors.some((s) => s.id === p.id))
+    : [];
+
+  const allDistractors = [...smartDistractors, ...fallback].slice(0, 3);
+  const distractors = allDistractors.map((p) => answerValueFor(p, kind));
 
   // Nếu pool quá nhỏ, đáp án trùng là chấp nhận được
-  const options = shuffle([answerValueFor(item, kind), ...distractors]);
+  const options = shuffle([correctAnswer, ...distractors]);
 
   let prompt = "";
   let promptSub: string | undefined;
