@@ -128,7 +128,10 @@ export async function getVocabByLesson(lesson: number): Promise<Vocab[]> {
     .select("*")
     .eq("lesson_number", lesson)
     .order("created_at", { ascending: true });
-  if (error) throw new Error(`getVocabByLesson: ${error.message}`);
+  if (error) {
+    if (error.message.includes("does not exist")) return [];
+    throw new Error(`getVocabByLesson: ${error.message}`);
+  }
   return (data ?? []) as Vocab[];
 }
 
@@ -141,7 +144,11 @@ export async function getLessonStats(
     .from(kind)
     .select("lesson_number")
     .gt("lesson_number", 0);
-  if (error) throw new Error(`getLessonStats(${kind}): ${error.message}`);
+  if (error) {
+    // Cột chưa có (migration chưa chạy) → trả rỗng, không crash
+    if (error.message.includes("does not exist")) return {};
+    throw new Error(`getLessonStats(${kind}): ${error.message}`);
+  }
   const out: Record<number, number> = {};
   for (const row of data ?? []) {
     const n = (row as { lesson_number: number }).lesson_number;
@@ -172,16 +179,46 @@ export async function updateVocab(
  * Tạo bài mới: gán tất cả item chưa xếp bài (lesson_number = 0) sang bài `to`.
  * Gọi RPC create_lesson phía Postgres — tự động thêm cột lesson_number nếu thiếu.
  * Trả về số item đã gán (vocab + kanji).
+ * Nếu cả RPC + REST đều fail → ném lỗi kèm hướng dẫn migration.
  */
 export async function bulkAssignLesson(
   _kind: "vocab" | "kanji",
   to: number,
 ): Promise<number> {
   const sb = getSupabase();
+
+  // Thử RPC trước (tự tạo cột + gán)
   const { data, error } = await sb.rpc("create_lesson", { p_lesson: to });
-  if (error) throw new Error(`create_lesson: ${error.message}`);
-  const r = data as { moved_vocab?: number; moved_kanji?: number } | null;
-  return (r?.moved_vocab ?? 0) + (r?.moved_kanji ?? 0);
+  if (!error) {
+    const r = data as { moved_vocab?: number; moved_kanji?: number } | null;
+    return (r?.moved_vocab ?? 0) + (r?.moved_kanji ?? 0);
+  }
+
+  // RPC fail → thử REST update trực tiếp (khi cột đã tồn tại nhưng cache chưa reload)
+  const [vResult, kResult] = await Promise.all([
+    sb
+      .from("vocab")
+      .update({ lesson_number: to, updated_at: new Date().toISOString() })
+      .eq("lesson_number", 0),
+    sb
+      .from("kanji")
+      .update({ lesson_number: to, updated_at: new Date().toISOString() })
+      .eq("lesson_number", 0),
+  ]);
+
+  if (vResult.error || kResult.error) {
+    // Lỗi này có thể do cột chưa tồn tại trong DB.
+    // Bất kể lỗi gì, user cần chạy migration.
+    throw new Error(
+      "Migration chưa được chạy. Vui lòng chạy SQL migration trong Supabase Dashboard → SQL Editor.",
+    );
+  }
+
+  // Sau đây TypeScript biết không có error → count từ update result
+  // update().eq() trả data: T[] | null
+  const vData = ((vResult.data as unknown) as Array<unknown>) ?? [];
+  const kData = ((kResult.data as unknown) as Array<unknown>) ?? [];
+  return vData.length + kData.length;
 }
 
 /** Thống kê nhanh: tổng số từ + số từ hôm nay */
@@ -274,7 +311,10 @@ export async function getKanjiByLesson(lesson: number): Promise<Kanji[]> {
     .select("*")
     .eq("lesson_number", lesson)
     .order("created_at", { ascending: true });
-  if (error) throw new Error(`getKanjiByLesson: ${error.message}`);
+  if (error) {
+    if (error.message.includes("does not exist")) return [];
+    throw new Error(`getKanjiByLesson: ${error.message}`);
+  }
   return (data ?? []) as Kanji[];
 }
 
