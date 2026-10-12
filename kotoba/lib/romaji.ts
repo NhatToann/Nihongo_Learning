@@ -26,6 +26,24 @@ export interface ParsedWord {
    * `wanakana` không có CSDL tra kanji → app cần hỏi thêm romaji.
    */
   needsReading: boolean;
+  /**
+   * Nghĩa từ Jisho (nếu đã lookup) — gợi ý cho user.
+   * Đặc biệt hữu ích với loan word: user chỉ cần gõ romaji, có nghĩa luôn.
+   */
+  jishoMeaning?: string;
+  /**
+   * true nếu Jisho xác nhận từ này gốc katakana (loan word).
+   * Khi đó form sẽ ưu tiên hiển thị katakana làm chính.
+   */
+  isKatakanaWord?: boolean;
+  /**
+   * Nguồn quyết định script chính hiển thị:
+   *  - "kanji"  : có kanji (vd: 日本語)
+   *  - "katakana" : loan word từ Jisho (vd: エアコン)
+   *  - "hiragana" : mặc định (vd: さくら)
+   *  - "raw"     : không convert được
+   */
+  script?: "kanji" | "katakana" | "hiragana" | "raw";
 }
 
 /** Chuẩn hoá romaji cho wanakana: bỏ khoảng trắng thừa, giữ nguyên dấu * */
@@ -170,8 +188,11 @@ export function parseWord(input: string): ParsedWord {
 
 /** Chuỗi tiếng Nhật "đẹp nhất" để hiển thị: ưu tiên kanji nếu có */
 export function displayJapanese(p: ParsedWord): string {
+  // Loan word katakana — luôn hiển thị katakana
+  if (p.script === "katakana" && p.katakana) return p.katakana;
   if (p.kanji && p.hiragana) return `${p.kanji}（${p.hiragana}）`;
   if (p.kanji) return p.kanji;
+  if (p.katakana) return p.katakana;
   if (p.hiragana) return p.hiragana;
   return p.raw;
 }
@@ -192,6 +213,46 @@ export function withReading(p: ParsedWord, romaji: string): ParsedWord {
     hiragana: hira,
     katakana: toKatakana(normalize(romaji)),
     romaji: toRomaji(hira),
+    needsReading: false,
+  };
+}
+
+/**
+ * Áp dụng kết quả Jisho lên ParsedWord.
+ * Nếu Jisho xác nhận loan word → đổi script chính sang katakana.
+ * Nếu Jisho trả kanji cho romaji → bổ sung kanji.
+ * Nếu user đã gõ kanji từ trước → giữ nguyên kanji của user.
+ */
+export interface JishoLite {
+  kanji: string;
+  katakana: string;
+  hiragana: string;
+  isKatakanaWord: boolean;
+  englishDef: string;
+}
+export function applyJishoHit(p: ParsedWord, hit: JishoLite): ParsedWord {
+  // Nếu Jisho tìm được kanji mà user chưa có → bổ sung
+  const kanji = p.kanji || hit.kanji;
+  const hasKanji = kanji.length > 0;
+  const hira = hit.hiragana || p.hiragana;
+  const kata = hit.katakana || p.katakana;
+  const script = hasKanji
+    ? "kanji"
+    : hit.isKatakanaWord
+      ? "katakana"
+      : hira
+        ? "hiragana"
+        : "raw";
+  return {
+    ...p,
+    kanji,
+    hiragana: hira,
+    katakana: kata,
+    romaji: p.romaji || toRomaji(hira || kata),
+    hasKanji,
+    isKatakanaWord: hit.isKatakanaWord,
+    jishoMeaning: hit.englishDef,
+    script,
     needsReading: false,
   };
 }

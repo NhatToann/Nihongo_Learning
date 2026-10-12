@@ -1,8 +1,9 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
+  applyJishoHit,
   displayJapanese,
   parseInputLine,
   withReading,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/romaji";
 import { insertVocab, type NewVocab } from "@/lib/supabase/queries";
 import { ErrorNote, Toast } from "./ui";
+import { useJishoLookup, type JishoHit } from "@/hooks/use-jisho-lookup";
 
 // ═══════════════════════════════════════════════════════════════
 //  Form nhập từ mới
@@ -40,15 +42,18 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
   const [isPending, startTransition] = useTransition();
   // romaji bổ sung cho các mục kanji chưa có cách đọc
   const [readings, setReadings] = useState<Record<string, string>>({});
+  // Danh sách dòng đã parse — có thể thay đổi khi Jisho enrich
+  const [lines, setLines] = useState<ParsedLine[]>([]);
 
-  const lines = useMemo<ParsedLine[]>(() => {
-    const out: ParsedLine[] = [];
+  // Mỗi khi raw đổi → parse lại (giữ nguyên key để Jisho state không reset)
+  useEffect(() => {
+    const next: ParsedLine[] = [];
     raw.split("\n").forEach((line, i) => {
       const trimmed = line.trim();
       if (!trimmed) return;
       const parsed = parseInputLine(trimmed);
       if (!parsed) {
-        out.push({
+        next.push({
           key: `bad-${i}`,
           word: {
             raw: trimmed,
@@ -58,13 +63,14 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
             romaji: "",
             hasKanji: false,
             needsReading: false,
+            script: "raw",
           },
           meaning: "",
           valid: false,
         });
         return;
       }
-      out.push({
+      next.push({
         key: `ok-${i}-${parsed.word.raw}`,
         word: parsed.word,
         meaning: parsed.meaning,
@@ -72,7 +78,7 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
         valid: true,
       });
     });
-    return out;
+    setLines(next);
   }, [raw]);
 
   const validLines = lines.filter((l) => l.valid);
@@ -81,6 +87,13 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
     (l) => l.word.needsReading && !(readings[l.key] ?? "").trim(),
   );
   const canSave = validLines.length > 0 && needsReading.length === 0 && !isPending;
+
+  /** Cập nhật word khi Jisho enrich */
+  function updateWord(key: string, word: ParsedWord) {
+    setLines((prev) =>
+      prev.map((l) => (l.key === key ? { ...l, word } : l)),
+    );
+  }
 
   function handleSave() {
     setError(null);
@@ -201,6 +214,7 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
                 onReadingChange={(v) =>
                   setReadings((prev) => ({ ...prev, [l.key]: v }))
                 }
+                onWordChange={(w) => updateWord(l.key, w)}
               />
             ))}
           </div>
@@ -246,11 +260,41 @@ function PreviewRow({
   line,
   reading,
   onReadingChange,
+  onWordChange,
 }: {
   line: ParsedLine;
   reading: string;
   onReadingChange: (v: string) => void;
+  /** Báo cho parent biết ParsedWord đã thay đổi (do Jisho enrich) */
+  onWordChange?: (word: ParsedWord) => void;
 }) {
+  // Lookup Jisho khi user nhập romaji-only (không có kanji, không phải kana)
+  // Lấy phần "head" (trước dấu phẩy) từ raw để tra
+  const head = line.word.raw.split(/[,\t]/)[0].trim();
+  // Tách phần kana/romaji (bỏ kanji) để tra chính xác hơn
+  const queryTarget = useMemo(() => {
+    // Nếu word đã có hiragana/katakana → tra chính phần đó
+    if (line.word.katakana) return line.word.katakana;
+    if (line.word.hiragana) return line.word.hiragana;
+    return head;
+  }, [line.word, head]);
+  const { hit, loading } = useJishoLookup(queryTarget, 300);
+
+  // Áp dụng kết quả Jisho vào ParsedWord, báo lên parent
+  useEffect(() => {
+    if (!hit || !onWordChange) return;
+    const enriched = applyJishoHit(line.word, hit);
+    // Chỉ thông báo khi có thay đổi
+    if (
+      enriched.kanji !== line.word.kanji ||
+      enriched.script !== line.word.script ||
+      enriched.jishoMeaning !== line.word.jishoMeaning
+    ) {
+      onWordChange(enriched);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hit]);
+
   if (!line.valid) {
     return (
       <motion.div
@@ -281,6 +325,9 @@ function PreviewRow({
         <div className="min-w-0 flex-1">
           <p className="jp truncate text-[1.05rem] font-bold leading-tight">
             {displayJapanese(line.word)}
+            {loading && (
+              <span className="ml-1.5 inline-block h-3 w-3 animate-spin rounded-full border-2 border-cyan border-r-transparent align-middle" />
+            )}
           </p>
           <p className="mt-0.5 truncate text-[0.72rem] font-medium text-ink-faint">
             {line.word.romaji && (
@@ -290,6 +337,11 @@ function PreviewRow({
                   ? ` · ${line.word.katakana}`
                   : ""}
               </>
+            )}
+            {line.word.jishoMeaning && (
+              <span className="ml-1.5 italic text-cyan/80">
+                ({line.word.jishoMeaning})
+              </span>
             )}
           </p>
         </div>
