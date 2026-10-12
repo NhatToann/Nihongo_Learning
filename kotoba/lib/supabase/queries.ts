@@ -192,6 +192,29 @@ export async function filterVocabAgainstDB(
   return { unique, duplicates };
 }
 
+/**
+ * Gộp tất cả item của 1 bài về lesson=0 (chưa xếp).
+ * KHÔNG xoá từ — chỉ đưa về nhóm "chưa xếp bài".
+ * Trả về số item đã gộp.
+ */
+export async function deleteLesson(
+  kind: "vocab" | "kanji",
+  lessonNumber: number,
+): Promise<{ moved: number }> {
+  if (lessonNumber === 0) {
+    throw new Error("Không thể xoá bài 0 (nhóm chưa xếp).");
+  }
+  const sb = getSupabase();
+  const table = kind === "vocab" ? "vocab" : "kanji";
+  const { data, error } = await sb
+    .from(table)
+    .update({ lesson_number: 0, updated_at: new Date().toISOString() })
+    .eq("lesson_number", lessonNumber)
+    .select("id");
+  if (error) throw new Error(`deleteLesson: ${error.message}`);
+  return { moved: data?.length ?? 0 };
+}
+
 export async function getVocabByDate(date: string): Promise<Vocab[]> {
   const sb = getSupabase();
   const { data, error } = await sb

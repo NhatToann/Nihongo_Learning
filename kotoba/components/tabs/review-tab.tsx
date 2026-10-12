@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useMemo, useState } from "react";
 import type { StudyMode } from "@/lib/types";
 import { ScreenHeader } from "@/components/ui";
@@ -19,6 +19,8 @@ interface ReviewTabProps {
   onStart: (mode: StudyMode, count?: number, lesson?: number) => void;
   /** Tạo bài mới: gán tất cả item chưa có lesson_number vào bài `to` */
   onCreateLesson: (kind: "vocab" | "kanji", to: number) => Promise<number>;
+  /** Xoá bài: gộp item của bài về lesson_number=0 (không xoá từ) */
+  onDeleteLesson: (kind: "vocab" | "kanji", lesson: number) => Promise<number>;
 }
 
 const GLOBAL_LIMITS = [
@@ -36,9 +38,8 @@ export function ReviewTab({
   kanjiLessons,
   onStart,
   onCreateLesson,
+  onDeleteLesson,
 }: ReviewTabProps) {
-  const [vocabLimit, setVocabLimit] = useState(20);
-  const [kanjiLimit, setKanjiLimit] = useState(10);
   const [vocabTab, setVocabTab] = useState<"lessons" | "all">("lessons");
   const [kanjiTab, setKanjiTab] = useState<"lessons" | "all">("lessons");
 
@@ -73,6 +74,7 @@ export function ReviewTab({
           onTabChange={setVocabTab}
           onStart={(n) => onStart("lesson", undefined, n)}
           onCreateLesson={onCreateLesson}
+          onDeleteLesson={onDeleteLesson}
         />
 
         <LessonCard
@@ -88,6 +90,7 @@ export function ReviewTab({
           onTabChange={setKanjiTab}
           onStart={(n) => onStart("kanji-lesson", undefined, n)}
           onCreateLesson={onCreateLesson}
+          onDeleteLesson={onDeleteLesson}
         />
       </div>
 
@@ -106,11 +109,15 @@ export function ReviewTab({
         <ul className="space-y-1.5 text-[0.78rem] leading-relaxed text-ink-soft">
           <li className="flex gap-2">
             <span className="text-cyan">•</span>
-            <span>Tạo bài mới khi đã thêm đủ từ — nhấn “Tạo bài N+1” hoặc nhập số bất kỳ</span>
+            <span>Tạo bài mới khi đã thêm đủ từ — nhấn “Tạo bài N+1” hoặc nhập số bài bất kỳ</span>
           </li>
           <li className="flex gap-2">
             <span className="text-mint">•</span>
             <span>Bài chỉ chứa từ thuộc lesson_number đó — không bị trộn với bài khác</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-cyan">•</span>
+            <span>Giữ từ trên chip bài để xoá — các từ sẽ về nhóm chưa xếp</span>
           </li>
           <li className="flex gap-2">
             <span className="text-sun">•</span>
@@ -145,6 +152,7 @@ function LessonCard({
   onTabChange,
   onStart,
   onCreateLesson,
+  onDeleteLesson,
 }: {
   accent: string;
   title: string;
@@ -158,13 +166,15 @@ function LessonCard({
   onTabChange: (t: "lessons" | "all") => void;
   onStart: (lesson: number) => void;
   onCreateLesson: (kind: "vocab" | "kanji", to: number) => Promise<number>;
+  onDeleteLesson: (kind: "vocab" | "kanji", lesson: number) => Promise<number>;
 }) {
   const [globalLimit, setGlobalLimit] = useState(20);
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  // Tuỳ chọn tạo bài tuỳ ý (input số bài)
+  // Tuỳ chọn tạo bài tuỳ ý
   const [customLesson, setCustomLesson] = useState("");
-  const [showCustom, setShowCustom] = useState(false);
+  // Bài đang chờ xoá (confirm)
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
 
   const entries = useMemo(
     () =>
@@ -186,8 +196,26 @@ function LessonCard({
           ? `Đã gộp ${n} mục vào bài ${targetLesson}.`
           : `Bài ${targetLesson} — không có mục nào chưa xếp.`,
       );
-      setShowCustom(false);
       setCustomLesson("");
+    } catch (e) {
+      setHint(e instanceof Error ? e.message : "Lỗi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete(lessonNumber: number) {
+    if (busy) return;
+    setBusy(true);
+    setHint(null);
+    try {
+      const moved = await onDeleteLesson(kind, lessonNumber);
+      setHint(
+        moved > 0
+          ? `Đã gộp ${moved} mục của bài ${lessonNumber} về nhóm chưa xếp.`
+          : `Bài ${lessonNumber} đã trống.`,
+      );
+      setPendingDelete(null);
     } catch (e) {
       setHint(e instanceof Error ? e.message : "Lỗi.");
     } finally {
@@ -263,32 +291,20 @@ function LessonCard({
             <>
               <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
                 {entries.map(([n, count]) => (
-                  <motion.button
+                  <LessonChip
                     key={n}
-                    whileTap={{ scale: 0.96 }}
-                    onClick={() => onStart(n)}
-                    className="clay-interactive relative flex flex-col items-center gap-0.5 rounded-2xl px-2 py-2.5"
-                    style={{
-                      background: "white",
-                      borderTop: `2px solid ${accent}`,
-                    }}
-                  >
-                    <span
-                      className="text-[0.62rem] font-black uppercase tracking-[0.1em] text-ink-faint"
-                    >
-                      Bài
-                    </span>
-                    <span className="jp text-[1.4rem] font-black leading-none text-ink">
-                      {n}
-                    </span>
-                    <span className="text-[0.7rem] font-extrabold text-ink-soft">
-                      {count} {kind === "vocab" ? "từ" : "kanji"}
-                    </span>
-                  </motion.button>
+                    n={n}
+                    count={count}
+                    kind={kind}
+                    accent={accent}
+                    busy={busy}
+                    onStart={() => onStart(n)}
+                    onRequestDelete={() => setPendingDelete(n)}
+                  />
                 ))}
               </div>
 
-              {/* Nút tạo bài N+1 + tuỳ chọn nhập số bài bất kỳ */}
+              {/* Tạo bài N+1 + tuỳ chọn số bài (luôn hiển thị khi có bài) */}
               <div className="mt-3 flex gap-1.5">
                 <motion.button
                   whileTap={busy ? undefined : { scale: 0.98 }}
@@ -299,28 +315,16 @@ function LessonCard({
                   <Icon name="plus" className="size-4" />
                   {busy ? "Đang tạo…" : `Tạo bài ${nextLesson}`}
                 </motion.button>
-                <motion.button
-                  whileTap={busy ? undefined : { scale: 0.98 }}
-                  onClick={() => setShowCustom((s) => !s)}
-                  disabled={busy}
-                  className="btn btn-ghost px-3 py-3"
-                  aria-label="Tạo bài tuỳ ý"
-                >
-                  <span className="text-[0.85rem] font-black">…</span>
-                </motion.button>
-              </div>
-              {showCustom && (
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span className="text-[0.72rem] font-bold text-ink-soft">Bài số</span>
+                <div className="flex flex-1 items-center gap-1 rounded-2xl bg-white px-2 py-1 shadow-[inset_0_2px_0_rgba(0,0,0,0.04)]">
+                  <span className="text-[0.66rem] font-bold text-ink-faint">Bài số</span>
                   <input
                     type="number"
                     min={1}
                     inputMode="numeric"
                     value={customLesson}
                     onChange={(e) => setCustomLesson(e.target.value)}
-                    placeholder="VD: 5"
-                    className="field flex-1 py-1.5 text-[0.85rem]"
-                    style={{ minHeight: 0 }}
+                    placeholder="VD: 34"
+                    className="flex-1 bg-transparent text-[0.85rem] font-bold text-ink outline-none placeholder:text-ink-faint"
                   />
                   <button
                     type="button"
@@ -329,12 +333,12 @@ function LessonCard({
                       const n = Number(customLesson);
                       if (Number.isFinite(n) && n > 0) handleCreate(n);
                     }}
-                    className="btn btn-cyan px-3 py-1.5 text-[0.78rem] disabled:opacity-40"
+                    className="btn btn-cyan px-2.5 py-1 text-[0.74rem] disabled:opacity-40"
                   >
                     Tạo
                   </button>
                 </div>
-              )}
+              </div>
               {hint && (
                 <p className="mt-1.5 text-center text-[0.7rem] font-semibold text-ink-soft">
                   {hint}
@@ -342,6 +346,20 @@ function LessonCard({
               )}
             </>
           )}
+
+          {/* Confirm xoá bài */}
+          <AnimatePresence>
+            {pendingDelete !== null && (
+              <ConfirmDeleteOverlay
+                lesson={pendingDelete}
+                count={entries.find(([n]) => n === pendingDelete)?.[1] ?? 0}
+                kind={kind}
+                busy={busy}
+                onConfirm={() => confirmDelete(pendingDelete)}
+                onCancel={() => setPendingDelete(null)}
+              />
+            )}
+          </AnimatePresence>
         </div>
       ) : (
         <div className="relative mt-3">
@@ -385,6 +403,128 @@ function LessonCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ── Chip bài học (có nút xoá) ──────────────────────────────────
+
+function LessonChip({
+  n,
+  count,
+  kind,
+  accent,
+  busy,
+  onStart,
+  onRequestDelete,
+}: {
+  n: number;
+  count: number;
+  kind: "vocab" | "kanji";
+  accent: string;
+  busy: boolean;
+  onStart: () => void;
+  onRequestDelete: () => void;
+}) {
+  return (
+    <div
+      className="clay-interactive relative flex flex-col items-center gap-0.5 rounded-2xl px-2 py-2.5"
+      style={{
+        background: "white",
+        borderTop: `2px solid ${accent}`,
+      }}
+    >
+      <button
+        onClick={onStart}
+        disabled={busy}
+        className="flex w-full flex-col items-center gap-0.5 disabled:opacity-50"
+        aria-label={`Mở bài ${n}`}
+      >
+        <span className="text-[0.62rem] font-black uppercase tracking-[0.1em] text-ink-faint">
+          Bài
+        </span>
+        <span className="jp text-[1.4rem] font-black leading-none text-ink">
+          {n}
+        </span>
+        <span className="text-[0.7rem] font-extrabold text-ink-soft">
+          {count} {kind === "vocab" ? "từ" : "kanji"}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRequestDelete();
+        }}
+        disabled={busy}
+        aria-label={`Xoá bài ${n}`}
+        className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full text-ink-faint transition hover:bg-rose/15 hover:text-rose active:scale-90 disabled:opacity-40"
+      >
+        <Icon name="trash" className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+// ── Overlay confirm xoá bài ────────────────────────────────────
+
+function ConfirmDeleteOverlay({
+  lesson,
+  count,
+  kind,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  lesson: number;
+  count: number;
+  kind: "vocab" | "kanji";
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-white/95 p-4 backdrop-blur"
+    >
+      <motion.div
+        initial={{ scale: 0.92, y: 8 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.95 }}
+        className="clay w-full max-w-[260px] p-4 text-center"
+        style={{ background: "white" }}
+      >
+        <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-full bg-rose/15 text-rose">
+          <Icon name="trash" className="size-5" />
+        </div>
+        <p className="text-[0.95rem] font-extrabold text-ink">Xoá bài {lesson}?</p>
+        <p className="mt-1 text-[0.74rem] leading-relaxed text-ink-soft">
+          {count} {kind === "vocab" ? "từ" : "kanji"} sẽ về nhóm chưa xếp.
+          <br />
+          Bạn có thể gộp lại vào bài khác sau.
+        </p>
+        <div className="mt-3 flex gap-1.5">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="btn btn-ghost flex-1 py-2 text-[0.82rem]"
+          >
+            Huỷ
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 rounded-2xl bg-rose px-3 py-2 text-[0.82rem] font-extrabold text-white shadow-[0_4px_0_rgba(0,0,0,0.08)] active:translate-y-px disabled:opacity-50"
+          >
+            {busy ? "Đang xoá…" : "Xoá bài"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -453,7 +593,7 @@ function EmptyLessons({
             inputMode="numeric"
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            placeholder="Hoặc nhập số bài khác"
+            placeholder="Hoặc nhập số bài khác (VD: 34)"
             className="field flex-1 py-1.5 text-[0.78rem]"
             style={{ minHeight: 0 }}
           />

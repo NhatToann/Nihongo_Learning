@@ -27,6 +27,7 @@ import {
   bulkAssignLesson,
   completeSession,
   deleteKanji,
+  deleteLesson,
   deleteVocab,
   ensureAppState,
   getAllKanji,
@@ -549,6 +550,12 @@ useEffect(() => {
                   const n = await bulkAssignLesson(kind, to);
                   await loadAll();
                   return n;
+                }}
+                onDeleteLesson={async (kind, lessonNumber) => {
+                  if (demoMode) return 0;
+                  const { moved } = await deleteLesson(kind, lessonNumber);
+                  await loadAll();
+                  return moved;
                 }}
               />
             )}
