@@ -4,6 +4,12 @@
 --  Khong can auth. Bang app_state la "user" duy nhat.
 -- ============================================================
 
+-- 0. Migration: them cot lesson_number neu bang da ton tai
+alter table public.vocab add column if not exists lesson_number integer not null default 0;
+alter table public.kanji add column if not exists lesson_number integer not null default 0;
+create index if not exists vocab_lesson_number_idx on public.vocab (lesson_number);
+create index if not exists kanji_lesson_number_idx on public.kanji (lesson_number);
+
 -- 1. Bang trang thai (dung lam nguon su that duy nhat)
 create table if not exists public.app_state (
   id                text primary key,
