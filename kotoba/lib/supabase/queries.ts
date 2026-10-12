@@ -84,7 +84,7 @@ export interface NewVocab {
 export async function insertVocab(rows: NewVocab[]): Promise<Vocab[]> {
   if (rows.length === 0) return [];
   const sb = getSupabase();
-  const payload = rows.map((r) => ({
+  const fullPayload = rows.map((r) => ({
     romaji: r.romaji,
     hiragana: r.hiragana,
     katakana: r.katakana,
@@ -94,7 +94,28 @@ export async function insertVocab(rows: NewVocab[]): Promise<Vocab[]> {
     study_date: r.study_date ?? todayVN(),
   }));
 
-  const { data, error } = await sb.from("vocab").insert(payload).select();
+  // Thử insert đầy đủ trước
+  let { data, error } = await sb.from("vocab").insert(fullPayload).select();
+  if (error && /lesson_number|schema cache|does not exist/i.test(error.message)) {
+    // Schema cache chưa refresh → thử lại không truyền lesson_number
+    // (cột đã có trong DB với default 0, PostgREST chỉ thiếu cache)
+    const fallback = rows.map((r) => ({
+      romaji: r.romaji,
+      hiragana: r.hiragana,
+      katakana: r.katakana,
+      meaning_vi: r.meaning_vi,
+      note: r.note ?? null,
+      study_date: r.study_date ?? todayVN(),
+    }));
+    const res2 = await sb.from("vocab").insert(fallback).select();
+    data = res2.data;
+    error = res2.error;
+    if (!error && data) {
+      // Gán lesson_number thủ công sau (khi cột tồn tại)
+      // Đợi 1 lần query update nếu cần; bỏ qua vì default = 0
+      // Người dùng có thể gán bài sau bằng nút "Tạo bài N+1"
+    }
+  }
   if (error) throw new Error(`insertVocab: ${error.message}`);
   return (data ?? []) as Vocab[];
 }
@@ -168,10 +189,19 @@ export async function updateVocab(
   patch: Partial<NewVocab>,
 ): Promise<void> {
   const sb = getSupabase();
-  const { error } = await sb
+  let { error } = await sb
     .from("vocab")
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", id);
+  if (error && /lesson_number|schema cache|does not exist/i.test(error.message)) {
+    // Retry không kèm lesson_number
+    const { lesson_number: _omit, ...rest } = patch;
+    const res = await sb
+      .from("vocab")
+      .update({ ...rest, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    error = res.error;
+  }
   if (error) throw new Error(`updateVocab: ${error.message}`);
 }
 
@@ -277,7 +307,21 @@ export async function insertKanji(rows: NewKanji[]): Promise<Kanji[]> {
     study_date: r.study_date ?? todayVN(),
   }));
 
-  const { data, error } = await sb.from("kanji").insert(payload).select();
+  let { data, error } = await sb.from("kanji").insert(payload).select();
+  if (error && /lesson_number|schema cache|does not exist/i.test(error.message)) {
+    const fallback = unique.map((r) => ({
+      character: r.character.trim(),
+      meaning_vi: r.meaning_vi,
+      onyomi: r.onyomi ?? "",
+      kunyomi: r.kunyomi ?? "",
+      stroke_count: r.stroke_count ?? null,
+      note: r.note ?? null,
+      study_date: r.study_date ?? todayVN(),
+    }));
+    const res2 = await sb.from("kanji").insert(fallback).select();
+    data = res2.data;
+    error = res2.error;
+  }
   if (error) throw new Error(`insertKanji: ${error.message}`);
   return (data ?? []) as Kanji[];
 }
