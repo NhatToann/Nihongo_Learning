@@ -16,6 +16,8 @@ interface LearnTabProps {
   onSaved: () => void;
   vocabToday: Vocab[];
   kanjiToday: Kanji[];
+  vocabLessons: Record<number, number>;
+  kanjiLessons: Record<number, number>;
   onDeleteVocab: (id: string) => Promise<void>;
   onDeleteKanji: (id: string) => Promise<void>;
 }
@@ -26,6 +28,8 @@ export function LearnTab({
   onSaved,
   vocabToday,
   kanjiToday,
+  vocabLessons,
+  kanjiLessons,
   onDeleteVocab,
   onDeleteKanji,
 }: LearnTabProps) {
@@ -65,7 +69,7 @@ export function LearnTab({
       <div className="mt-4">
         {sub === "vocab" ? (
           <>
-            <VocabInputForm onSaved={onSaved} />
+            <VocabInputForm onSaved={onSaved} vocabLessons={vocabLessons} />
             <TodayList
               items={vocabToday}
               kind="vocab"
@@ -74,7 +78,7 @@ export function LearnTab({
           </>
         ) : (
           <>
-            <KanjiInputForm onSaved={onSaved} />
+            <KanjiInputForm onSaved={onSaved} kanjiLessons={kanjiLessons} />
             <TodayList
               items={kanjiToday}
               kind="kanji"

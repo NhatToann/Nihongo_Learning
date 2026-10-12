@@ -15,6 +15,7 @@ const vocab: Vocab[] = words.map((w, i) => {
     katakana: p.katakana,
     meaning_vi: meanings[i],
     note: null,
+    lesson_number: 0,
     study_date: "2026-10-12",
   };
 });
@@ -34,6 +35,7 @@ const kanji: Kanji[] = kanjiChars.map(([c, m, o], i) => ({
   kunyomi: "",
   stroke_count: null,
   note: null,
+  lesson_number: 0,
   study_date: "2026-10-12",
 }));
 

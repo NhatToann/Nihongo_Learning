@@ -77,6 +77,7 @@ export interface NewVocab {
   katakana: string;
   meaning_vi: string;
   note?: string | null;
+  lesson_number?: number;
   study_date?: string;
 }
 
@@ -89,6 +90,7 @@ export async function insertVocab(rows: NewVocab[]): Promise<Vocab[]> {
     katakana: r.katakana,
     meaning_vi: r.meaning_vi,
     note: r.note ?? null,
+    lesson_number: r.lesson_number ?? 0,
     study_date: r.study_date ?? todayVN(),
   }));
 
@@ -118,6 +120,36 @@ export async function getAllVocab(): Promise<Vocab[]> {
   return (data ?? []) as Vocab[];
 }
 
+/** Tất cả từ trong 1 bài (lesson_number = N) */
+export async function getVocabByLesson(lesson: number): Promise<Vocab[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("vocab")
+    .select("*")
+    .eq("lesson_number", lesson)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`getVocabByLesson: ${error.message}`);
+  return (data ?? []) as Vocab[];
+}
+
+/** Thống kê lesson: { 1: 6, 2: 10, ... } (loại bỏ lesson = 0) */
+export async function getLessonStats(
+  kind: "vocab" | "kanji",
+): Promise<Record<number, number>> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(kind)
+    .select("lesson_number")
+    .gt("lesson_number", 0);
+  if (error) throw new Error(`getLessonStats(${kind}): ${error.message}`);
+  const out: Record<number, number> = {};
+  for (const row of data ?? []) {
+    const n = (row as { lesson_number: number }).lesson_number;
+    out[n] = (out[n] ?? 0) + 1;
+  }
+  return out;
+}
+
 export async function deleteVocab(id: string): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.from("vocab").delete().eq("id", id);
@@ -134,6 +166,21 @@ export async function updateVocab(
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw new Error(`updateVocab: ${error.message}`);
+}
+
+/** Đổi toàn bộ item chưa xếp bài (lesson_number = 0) sang bài `to` */
+export async function bulkAssignLesson(
+  kind: "vocab" | "kanji",
+  to: number,
+): Promise<number> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(kind)
+    .update({ lesson_number: to, updated_at: new Date().toISOString() })
+    .eq("lesson_number", 0)
+    .select("id");
+  if (error) throw new Error(`bulkAssignLesson: ${error.message}`);
+  return data?.length ?? 0;
 }
 
 /** Thống kê nhanh: tổng số từ + số từ hôm nay */
@@ -164,6 +211,7 @@ export interface NewKanji {
   kunyomi?: string;
   stroke_count?: number | null;
   note?: string | null;
+  lesson_number?: number;
   study_date?: string;
 }
 
@@ -187,6 +235,7 @@ export async function insertKanji(rows: NewKanji[]): Promise<Kanji[]> {
     kunyomi: r.kunyomi ?? "",
     stroke_count: r.stroke_count ?? null,
     note: r.note ?? null,
+    lesson_number: r.lesson_number ?? 0,
     study_date: r.study_date ?? todayVN(),
   }));
 
@@ -213,6 +262,18 @@ export async function getAllKanji(): Promise<Kanji[]> {
     .select("*")
     .order("study_date", { ascending: false });
   if (error) throw new Error(`getAllKanji: ${error.message}`);
+  return (data ?? []) as Kanji[];
+}
+
+/** Tất cả kanji trong 1 bài */
+export async function getKanjiByLesson(lesson: number): Promise<Kanji[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("kanji")
+    .select("*")
+    .eq("lesson_number", lesson)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`getKanjiByLesson: ${error.message}`);
   return (data ?? []) as Kanji[];
 }
 

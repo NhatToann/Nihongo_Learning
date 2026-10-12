@@ -44,6 +44,8 @@ export interface ParsedWord {
    *  - "raw"     : không convert được
    */
   script?: "kanji" | "katakana" | "hiragana" | "raw";
+  /** Bài học (0 = chưa xếp) — mặc định khi lưu vào DB */
+  lesson_number?: number;
 }
 
 /** Chuẩn hoá romaji cho wanakana: bỏ khoảng trắng thừa, giữ nguyên dấu * */

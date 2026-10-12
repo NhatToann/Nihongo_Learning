@@ -24,6 +24,7 @@ import {
   demoVocab,
 } from "@/lib/supabase/demo";
 import {
+  bulkAssignLesson,
   completeSession,
   deleteKanji,
   deleteVocab,
@@ -32,10 +33,13 @@ import {
   getAllVocab,
   getGachaTiers,
   getKanjiByDate,
+  getKanjiByLesson,
+  getLessonStats,
   getStudyCalendar,
   getTodaySessions,
   getTodaySpins,
   getVocabByDate,
+  getVocabByLesson,
   logAttempts,
   startSession,
   spinWheel,
@@ -95,6 +99,9 @@ export default function KotobaApp() {
   const [todayCompleted, setTodayCompleted] = useState<Set<string>>(new Set());
   const [todaySpun, setTodaySpun] = useState<Set<string>>(new Set());
   const [calendar, setCalendar] = useState<Record<string, number>>({});
+  // Stats theo lesson: { 1: 6, 2: 10, ... }
+  const [vocabLessons, setVocabLessons] = useState<Record<number, number>>({});
+  const [kanjiLessons, setKanjiLessons] = useState<Record<number, number>>({});
 
   // ── Điều hướng ──
   const [tab, setTab] = useState<Tab>("home");
@@ -114,13 +121,26 @@ export default function KotobaApp() {
   const demoLoad = useCallback(() => {
     setDiamonds(demoAppState().diamonds);
     setStreak(demoAppState().current_streak);
-    setVocab(demoVocab());
-    setKanji(demoKanji());
+    const v = demoVocab();
+    const k = demoKanji();
+    setVocab(v);
+    setKanji(k);
     setTiers(demoTiers());
     setCalendar(demoCalendar());
     setTodayCompleted(DEMO_COMPLETED);
     setTodaySpun(new Set<string>());
     setMissedDays(0);
+    // Tính lesson stats từ demo
+    const vStats: Record<number, number> = {};
+    const kStats: Record<number, number> = {};
+    for (const x of v) {
+      if (x.lesson_number > 0) vStats[x.lesson_number] = (vStats[x.lesson_number] ?? 0) + 1;
+    }
+    for (const x of k) {
+      if (x.lesson_number > 0) kStats[x.lesson_number] = (kStats[x.lesson_number] ?? 0) + 1;
+    }
+    setVocabLessons(vStats);
+    setKanjiLessons(kStats);
   }, []);
 
   const loadAll = useCallback(async () => {
@@ -129,15 +149,18 @@ export default function KotobaApp() {
       return;
     }
 
-    const [state, v, k, t, sessions, spins, cal] = await Promise.all([
-      ensureAppState(),
-      getAllVocab(),
-      getAllKanji(),
-      getGachaTiers(),
-      getTodaySessions(),
-      getTodaySpins(),
-      getStudyCalendar(),
-    ]);
+    const [state, v, k, t, sessions, spins, cal, vLessons, kLessons] =
+      await Promise.all([
+        ensureAppState(),
+        getAllVocab(),
+        getAllKanji(),
+        getGachaTiers(),
+        getTodaySessions(),
+        getTodaySpins(),
+        getStudyCalendar(),
+        getLessonStats("vocab"),
+        getLessonStats("kanji"),
+      ]);
 
     setDiamonds(state.diamonds);
     setStreak(state.current_streak);
@@ -145,6 +168,8 @@ export default function KotobaApp() {
     setKanji(k);
     setTiers(t);
     setCalendar(cal);
+    setVocabLessons(vLessons);
+    setKanjiLessons(kLessons);
     setTodayCompleted(new Set(sessions.filter((s) => s.completed).map((s) => s.mode)));
     setTodaySpun(new Set(spins.map((s) => `${s.mode}:${s.kind}`)));
 
@@ -185,46 +210,57 @@ useEffect(() => {
 
   // ═══════════════════════════════════════════════════════════
   //  Mở bài quiz
+  //  - mode "review" / "kanji-review": cả thư viện (giữ limit từ prop count)
+  //  - mode "daily" / "kanji-daily" : chỉ hôm nay
+  //  - mode "lesson" / "kanji-lesson": chỉ trong bài lesson
   // ═══════════════════════════════════════════════════════════
 
   const beginQuiz = useCallback(
-    async (mode: StudyMode, count?: number) => {
+    async (mode: StudyMode, count?: number, lesson?: number) => {
       try {
         setFatalError(null);
         const today = todayVN();
         const isK = mode.startsWith("kanji");
+        const isLesson = mode === "lesson" || mode === "kanji-lesson";
+        const isReview = mode === "review" || mode === "kanji-review";
 
-        let dailyItems: StudyItem[];
-        let pool: StudyItem[];
+        let dailyItems: StudyItem[] = [];
+        let pool: StudyItem[] = [];
+        let source: StudyItem[] = [];
 
         if (demoMode) {
           pool = isK ? demoKanji() : demoVocab();
           dailyItems = pool.filter((i) => i.study_date === today);
+          if (isLesson) {
+            source = pool.filter((i) => i.lesson_number === lesson);
+          } else {
+            source = isReview ? pool : dailyItems;
+          }
         } else {
-          const fetched = isK
-            ? [await getKanjiByDate(today), kanji]
-            : [await getVocabByDate(today), vocab];
-          dailyItems = fetched[0] as StudyItem[];
-          pool = fetched[1] as StudyItem[];
+          if (isLesson) {
+            // Lesson mode: lấy chính xác từ bài đó, pool = tất cả để lấy đáp án sai
+            const lessonItems = isK
+              ? await getKanjiByLesson(lesson ?? 0)
+              : await getVocabByLesson(lesson ?? 0);
+            source = lessonItems as StudyItem[];
+            pool = isK ? (kanji as StudyItem[]) : (vocab as StudyItem[]);
+          } else {
+            const fetched = isK
+              ? [await getKanjiByDate(today), kanji]
+              : [await getVocabByDate(today), vocab];
+            dailyItems = fetched[0] as StudyItem[];
+            pool = fetched[1] as StudyItem[];
+            source = isReview ? pool : dailyItems;
+          }
         }
-
-        if (pool.length === 0) {
-          setFatalError(
-            isK
-              ? "Chưa có kanji nào. Thêm kanji ở tab Học trước nhé."
-              : "Chưa có từ nào. Thêm từ ở tab Học trước nhé.",
-          );
-          return;
-        }
-
-        const isReview = mode === "review" || mode === "kanji-review";
-        const source: StudyItem[] = isReview ? pool : dailyItems;
 
         if (source.length === 0) {
           setFatalError(
-            isK
-              ? "Hôm nay bạn chưa thêm kanji nào. Vào tab Học để thêm nhé."
-              : "Hôm nay bạn chưa thêm từ nào. Vào tab Học để thêm nhé.",
+            isLesson
+              ? `Bài ${lesson ?? 0} chưa có ${isK ? "kanji" : "từ"} nào.`
+              : isK
+                ? "Chưa có kanji nào. Thêm kanji ở tab Học trước nhé."
+                : "Chưa có từ nào. Thêm từ ở tab Học trước nhé.",
           );
           return;
         }
@@ -244,14 +280,17 @@ useEffect(() => {
         }
 
         const { id } = demoMode
-          ? { id: `demo-session-${mode}-${today}` }
+          ? { id: `demo-session-${mode}-${lesson ?? today}` }
           : await startSession(mode, today);
         sessionIdRef.current = id;
         modeRef.current = mode;
         answerBuffer.current = [];
         setQuizQuestions(questions);
 
-        setScreen({ kind: "quiz", mode, title: quizTitle(mode, questions.length) });
+        const title = isLesson
+          ? `Bài ${lesson} · ${questions.length} câu`
+          : quizTitle(mode, questions.length);
+        setScreen({ kind: "quiz", mode, title });
       } catch (e) {
         setFatalError(e instanceof Error ? e.message : "Không tạo được bài học.");
       }
@@ -481,6 +520,8 @@ useEffect(() => {
                 onSaved={() => void loadAll()}
                 vocabToday={vocab.filter((v) => v.study_date === todayVN())}
                 kanjiToday={kanji.filter((k) => k.study_date === todayVN())}
+                vocabLessons={vocabLessons}
+                kanjiLessons={kanjiLessons}
                 onDeleteVocab={async (id) => {
                   await deleteVocab(id);
                   await loadAll();
@@ -496,7 +537,19 @@ useEffect(() => {
               <ReviewTab
                 vocabCount={vocab.length}
                 kanjiCount={kanji.length}
-                onStart={(mode, count) => void beginQuiz(mode, count)}
+                vocabLessons={vocabLessons}
+                kanjiLessons={kanjiLessons}
+                onStart={(mode, count, lesson) => void beginQuiz(mode, count, lesson)}
+                onCreateLesson={async (kind, to) => {
+                  if (demoMode) {
+                    // Demo: gán bài cho item đầu tiên chưa có
+                    const n = await bulkAssignLesson(kind, to);
+                    return n;
+                  }
+                  const n = await bulkAssignLesson(kind, to);
+                  await loadAll();
+                  return n;
+                }}
               />
             )}
 
@@ -540,6 +593,10 @@ function quizTitle(mode: StudyMode, n: number): string {
         ? "Ôn tập tổng hợp"
         : mode === "kanji-daily"
           ? "Học kanji hôm nay"
-          : "Ôn tập kanji";
+          : mode === "kanji-review"
+            ? "Ôn tập kanji"
+            : mode === "lesson"
+              ? "Ôn tập từ vựng theo bài"
+              : "Ôn tập kanji theo bài";
   return `${base} · ${n} câu`;
 }

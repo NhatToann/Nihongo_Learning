@@ -35,7 +35,14 @@ const EXAMPLES = [
   "ryouri, nấu ăn",
 ];
 
-export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
+export function VocabInputForm({
+  onSaved,
+  vocabLessons = {},
+}: {
+  onSaved?: () => void;
+  /** Map { 1: 6, 2: 10 } — bài đã có để gợi ý dropdown */
+  vocabLessons?: Record<number, number>;
+}) {
   const [raw, setRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -44,6 +51,15 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
   const [readings, setReadings] = useState<Record<string, string>>({});
   // Danh sách dòng đã parse — có thể thay đổi khi Jisho enrich
   const [lines, setLines] = useState<ParsedLine[]>([]);
+  // Lesson hiện tại cho cả form: 0 = chưa xếp, 1..N = bài
+  const [lesson, setLesson] = useState(0);
+
+  const lessonOptions = useMemo(() => {
+    const nums = Object.keys(vocabLessons).map(Number).filter((n) => n > 0);
+    nums.sort((a, b) => a - b);
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    return { list: nums, next };
+  }, [vocabLessons]);
 
   // Mỗi khi raw đổi → parse lại (giữ nguyên key để Jisho state không reset)
   useEffect(() => {
@@ -72,14 +88,14 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
       }
       next.push({
         key: `ok-${i}-${parsed.word.raw}`,
-        word: parsed.word,
+        word: { ...parsed.word, lesson_number: lesson },
         meaning: parsed.meaning,
         note: parsed.note,
         valid: true,
       });
     });
     setLines(next);
-  }, [raw]);
+  }, [raw, lesson]);
 
   const validLines = lines.filter((l) => l.valid);
   const badLines = lines.filter((l) => !l.valid);
@@ -120,6 +136,7 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
         katakana: word.katakana,
         meaning_vi: l.meaning,
         note: l.note ?? null,
+        lesson_number: l.word.lesson_number ?? 0,
       };
     });
 
@@ -166,6 +183,42 @@ export function VocabInputForm({ onSaved }: { onSaved?: () => void }) {
               + {ex.split(",")[0]}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* ── Chọn bài ── */}
+      <div className="mt-3 flex items-center gap-2">
+        <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-ink-faint">
+          Bài
+        </p>
+        <div className="flex flex-1 flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setLesson(0)}
+            className="chip"
+            data-active={lesson === 0}
+          >
+            Chưa xếp
+          </button>
+          {lessonOptions.list.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setLesson(n)}
+              className="chip"
+              data-active={lesson === n}
+            >
+              Bài {n} ({vocabLessons[n]})
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setLesson(lessonOptions.next)}
+            className="chip"
+            data-active={lesson === lessonOptions.next}
+          >
+            + Bài {lessonOptions.next}
+          </button>
         </div>
       </div>
 

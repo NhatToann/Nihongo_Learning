@@ -22,35 +22,39 @@ comment on table public.app_state is
 
 -- 2. Tu vung
 create table if not exists public.vocab (
-  id         uuid primary key default gen_random_uuid(),
-  romaji     text    not null,
-  hiragana   text    not null default '',
-  katakana   text    not null default '',
-  meaning_vi text    not null,
-  note       text,
-  study_date date    not null default current_date,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  romaji        text    not null,
+  hiragana      text    not null default '',
+  katakana      text    not null default '',
+  meaning_vi    text    not null,
+  note          text,
+  lesson_number integer not null default 0,   -- 0 = chưa xếp bài
+  study_date    date    not null default current_date,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
-create index if not exists vocab_study_date_idx on public.vocab (study_date desc);
-create index if not exists vocab_romaji_idx     on public.vocab (romaji);
+create index if not exists vocab_study_date_idx    on public.vocab (study_date desc);
+create index if not exists vocab_romaji_idx        on public.vocab (romaji);
+create index if not exists vocab_lesson_number_idx on public.vocab (lesson_number);
 
 -- 3. Kanji
 create table if not exists public.kanji (
-  id           uuid primary key default gen_random_uuid(),
-  character    text    not null unique,
-  meaning_vi   text    not null,
-  onyomi       text    not null default '',
-  kunyomi      text    not null default '',
-  stroke_count integer,
-  note         text,
-  study_date   date    not null default current_date,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  character     text    not null unique,
+  meaning_vi    text    not null,
+  onyomi        text    not null default '',
+  kunyomi       text    not null default '',
+  stroke_count  integer,
+  note          text,
+  lesson_number integer not null default 0,
+  study_date    date    not null default current_date,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
-create index if not exists kanji_study_date_idx on public.kanji (study_date desc);
+create index if not exists kanji_study_date_idx    on public.kanji (study_date desc);
+create index if not exists kanji_lesson_number_idx on public.kanji (lesson_number);
 
 -- 4. Lich su tra loi (cho SRS / thong ke)
 create table if not exists public.attempts (

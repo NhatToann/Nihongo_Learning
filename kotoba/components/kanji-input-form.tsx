@@ -21,11 +21,25 @@ interface ParsedKanjiLine {
   valid: boolean;
 }
 
-export function KanjiInputForm({ onSaved }: { onSaved?: () => void }) {
+export function KanjiInputForm({
+  onSaved,
+  kanjiLessons = {},
+}: {
+  onSaved?: () => void;
+  kanjiLessons?: Record<number, number>;
+}) {
   const [raw, setRaw] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [lesson, setLesson] = useState(0);
+
+  const lessonOptions = useMemo(() => {
+    const nums = Object.keys(kanjiLessons).map(Number).filter((n) => n > 0);
+    nums.sort((a, b) => a - b);
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    return { list: nums, next };
+  }, [kanjiLessons]);
 
   const lines = useMemo<ParsedKanjiLine[]>(() => {
     const out: ParsedKanjiLine[] = [];
@@ -77,6 +91,7 @@ export function KanjiInputForm({ onSaved }: { onSaved?: () => void }) {
       meaning_vi: l.meaning,
       onyomi: l.onyomi,
       kunyomi: l.kunyomi,
+      lesson_number: lesson,
     }));
 
     startTransition(async () => {
@@ -120,6 +135,42 @@ export function KanjiInputForm({ onSaved }: { onSaved?: () => void }) {
               + {ex.split(",")[0]}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* ── Chọn bài ── */}
+      <div className="flex items-center gap-2">
+        <p className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-ink-faint">
+          Bài
+        </p>
+        <div className="flex flex-1 flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setLesson(0)}
+            className="chip"
+            data-active={lesson === 0}
+          >
+            Chưa xếp
+          </button>
+          {lessonOptions.list.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setLesson(n)}
+              className="chip"
+              data-active={lesson === n}
+            >
+              Bài {n} ({kanjiLessons[n]})
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setLesson(lessonOptions.next)}
+            className="chip"
+            data-active={lesson === lessonOptions.next}
+          >
+            + Bài {lessonOptions.next}
+          </button>
         </div>
       </div>
 

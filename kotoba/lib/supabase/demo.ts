@@ -62,6 +62,8 @@ export function demoVocab(): Vocab[] {
       katakana: p.katakana,
       meaning_vi: meaning,
       note: null,
+      // Bài 1 cho 6 từ đầu, Bài 2 cho 6 từ tiếp, Bài 3 cho 4 từ cuối
+      lesson_number: i < 6 ? 1 : i < 12 ? 2 : 3,
       study_date: todayOffset(i < 10 ? 0 : i - 9),
     };
   });
@@ -76,6 +78,7 @@ export function demoKanji(): Kanji[] {
     kunyomi: kun,
     stroke_count: null,
     note: null,
+    lesson_number: i < 3 ? 1 : i < 7 ? 2 : 3,
     study_date: todayOffset(i < 5 ? 0 : i - 4),
   }));
 }

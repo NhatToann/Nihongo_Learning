@@ -5,8 +5,10 @@
 export type StudyMode =
   | "daily"
   | "review"
+  | "lesson"
   | "kanji-daily"
-  | "kanji-review";
+  | "kanji-review"
+  | "kanji-lesson";
 
 /** Tab điều hướng chính */
 export type Tab = "home" | "learn" | "review" | "kanji" | "stats";
@@ -21,6 +23,8 @@ export interface Vocab {
   katakana: string;
   meaning_vi: string;
   note: string | null;
+  /** 0 = chưa xếp bài, 1..N = bài học */
+  lesson_number: number;
   study_date: string;
   created_at?: string;
   updated_at?: string;
@@ -35,6 +39,7 @@ export interface Kanji {
   kunyomi: string;
   stroke_count: number | null;
   note: string | null;
+  lesson_number: number;
   study_date: string;
   created_at?: string;
   updated_at?: string;
