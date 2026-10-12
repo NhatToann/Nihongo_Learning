@@ -168,19 +168,20 @@ export async function updateVocab(
   if (error) throw new Error(`updateVocab: ${error.message}`);
 }
 
-/** Đổi toàn bộ item chưa xếp bài (lesson_number = 0) sang bài `to` */
+/**
+ * Tạo bài mới: gán tất cả item chưa xếp bài (lesson_number = 0) sang bài `to`.
+ * Gọi RPC create_lesson phía Postgres — tự động thêm cột lesson_number nếu thiếu.
+ * Trả về số item đã gán (vocab + kanji).
+ */
 export async function bulkAssignLesson(
-  kind: "vocab" | "kanji",
+  _kind: "vocab" | "kanji",
   to: number,
 ): Promise<number> {
   const sb = getSupabase();
-  const { data, error } = await sb
-    .from(kind)
-    .update({ lesson_number: to, updated_at: new Date().toISOString() })
-    .eq("lesson_number", 0)
-    .select("id");
-  if (error) throw new Error(`bulkAssignLesson: ${error.message}`);
-  return data?.length ?? 0;
+  const { data, error } = await sb.rpc("create_lesson", { p_lesson: to });
+  if (error) throw new Error(`create_lesson: ${error.message}`);
+  const r = data as { moved_vocab?: number; moved_kanji?: number } | null;
+  return (r?.moved_vocab ?? 0) + (r?.moved_kanji ?? 0);
 }
 
 /** Thống kê nhanh: tổng số từ + số từ hôm nay */

@@ -4,11 +4,8 @@
 --  Khong can auth. Bang app_state la "user" duy nhat.
 -- ============================================================
 
--- 0. Migration: them cot lesson_number neu bang da ton tai
-alter table public.vocab add column if not exists lesson_number integer not null default 0;
-alter table public.kanji add column if not exists lesson_number integer not null default 0;
-create index if not exists vocab_lesson_number_idx on public.vocab (lesson_number);
-create index if not exists kanji_lesson_number_idx on public.kanji (lesson_number);
+-- Cot lesson_number se duoc tu tao khi goi RPC create_lesson()
+-- (alter table if not exists column). Khong can migration thu cong.
 
 -- 1. Bang trang thai (dung lam nguon su that duy nhat)
 create table if not exists public.app_state (
@@ -422,6 +419,64 @@ begin
     'diamonds',  v_balance,
     'streak',    v_streak,
     'reversed',  p_reversed
+  );
+end;
+$$;
+
+-- ============================================================
+--  RPC: tu dong them cot lesson_number neu chua co, roi gan
+--  tat ca item chua xep bai (lesson_number = 0) sang bai `p_lesson`.
+--  Tra ve { ok, lesson, moved_vocab, moved_kanji, added_column }.
+-- ============================================================
+create or replace function public.create_lesson(
+  p_lesson integer
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_added boolean := false;
+  v_vocab_count integer := 0;
+  v_kanji_count integer := 0;
+begin
+  -- Tu them cot neu bang da ton tai tu truoc migration moi
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'vocab'
+       and column_name = 'lesson_number'
+  ) then
+    alter table public.vocab add column lesson_number integer not null default 0;
+    create index if not exists vocab_lesson_number_idx on public.vocab (lesson_number);
+    v_added := true;
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'kanji'
+       and column_name = 'lesson_number'
+  ) then
+    alter table public.kanji add column lesson_number integer not null default 0;
+    create index if not exists kanji_lesson_number_idx on public.kanji (lesson_number);
+    v_added := true;
+  end if;
+
+  update public.vocab
+     set lesson_number = p_lesson, updated_at = now()
+   where lesson_number = 0;
+  get diagnostics v_vocab_count = row_count;
+
+  update public.kanji
+     set lesson_number = p_lesson, updated_at = now()
+   where lesson_number = 0;
+  get diagnostics v_kanji_count = row_count;
+
+  return jsonb_build_object(
+    'ok',           true,
+    'lesson',       p_lesson,
+    'moved_vocab',  v_vocab_count,
+    'moved_kanji',  v_kanji_count,
+    'added_column', v_added
   );
 end;
 $$;

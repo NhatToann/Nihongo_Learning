@@ -106,7 +106,7 @@ export function ReviewTab({
         <ul className="space-y-1.5 text-[0.78rem] leading-relaxed text-ink-soft">
           <li className="flex gap-2">
             <span className="text-cyan">•</span>
-            <span>Tạo bài mới khi đã thêm đủ từ — nhấn “Tạo bài N+1” để gộp</span>
+            <span>Tạo bài mới khi đã thêm đủ từ — nhấn “Tạo bài N+1” hoặc nhập số bất kỳ</span>
           </li>
           <li className="flex gap-2">
             <span className="text-mint">•</span>
@@ -162,6 +162,9 @@ function LessonCard({
   const [globalLimit, setGlobalLimit] = useState(20);
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  // Tuỳ chọn tạo bài tuỳ ý (input số bài)
+  const [customLesson, setCustomLesson] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
 
   const entries = useMemo(
     () =>
@@ -171,19 +174,20 @@ function LessonCard({
     [lessons],
   );
   const nextLesson = currentLesson + 1;
-  const hasUnassigned = true; // ta luôn cho phep tao bai moi
 
-  async function handleCreate() {
+  async function handleCreate(targetLesson: number) {
     if (busy) return;
     setBusy(true);
     setHint(null);
     try {
-      const n = await onCreateLesson(kind, nextLesson);
+      const n = await onCreateLesson(kind, targetLesson);
       setHint(
         n > 0
-          ? `Đã gộp ${n} mục vào bài ${nextLesson}.`
-          : "Không có mục nào chưa xếp bài.",
+          ? `Đã gộp ${n} mục vào bài ${targetLesson}.`
+          : `Bài ${targetLesson} — không có mục nào chưa xếp.`,
       );
+      setShowCustom(false);
+      setCustomLesson("");
     } catch (e) {
       setHint(e instanceof Error ? e.message : "Lỗi.");
     } finally {
@@ -284,20 +288,53 @@ function LessonCard({
                 ))}
               </div>
 
-              {/* Nút tạo bài N+1 */}
-              <motion.button
-                whileTap={busy ? undefined : { scale: 0.98 }}
-                onClick={handleCreate}
-                disabled={busy}
-                className="btn btn-primary mt-3 w-full py-3 text-[0.85rem]"
-              >
-                <Icon name="plus" className="size-4" />
-                {busy
-                  ? "Đang tạo…"
-                  : hasUnassigned
-                    ? `Tạo bài ${nextLesson}`
-                    : `Bài ${nextLesson} (chưa có từ)`}
-              </motion.button>
+              {/* Nút tạo bài N+1 + tuỳ chọn nhập số bài bất kỳ */}
+              <div className="mt-3 flex gap-1.5">
+                <motion.button
+                  whileTap={busy ? undefined : { scale: 0.98 }}
+                  onClick={() => handleCreate(nextLesson)}
+                  disabled={busy}
+                  className="btn btn-primary flex-1 py-3 text-[0.85rem]"
+                >
+                  <Icon name="plus" className="size-4" />
+                  {busy ? "Đang tạo…" : `Tạo bài ${nextLesson}`}
+                </motion.button>
+                <motion.button
+                  whileTap={busy ? undefined : { scale: 0.98 }}
+                  onClick={() => setShowCustom((s) => !s)}
+                  disabled={busy}
+                  className="btn btn-ghost px-3 py-3"
+                  aria-label="Tạo bài tuỳ ý"
+                >
+                  <span className="text-[0.85rem] font-black">…</span>
+                </motion.button>
+              </div>
+              {showCustom && (
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="text-[0.72rem] font-bold text-ink-soft">Bài số</span>
+                  <input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={customLesson}
+                    onChange={(e) => setCustomLesson(e.target.value)}
+                    placeholder="VD: 5"
+                    className="field flex-1 py-1.5 text-[0.85rem]"
+                    style={{ minHeight: 0 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !customLesson}
+                    onClick={() => {
+                      const n = Number(customLesson);
+                      if (Number.isFinite(n) && n > 0) handleCreate(n);
+                    }}
+                    className="btn btn-cyan px-3 py-1.5 text-[0.78rem] disabled:opacity-40"
+                  >
+                    Tạo
+                  </button>
+                </div>
+              )}
               {hint && (
                 <p className="mt-1.5 text-center text-[0.7rem] font-semibold text-ink-soft">
                   {hint}
@@ -384,9 +421,10 @@ function EmptyLessons({
   accent: string;
   hasItems: boolean;
   busy: boolean;
-  onCreate: () => void;
+  onCreate: (n: number) => void;
   nextLesson: number;
 }) {
+  const [custom, setCustom] = useState("");
   return (
     <div className="rounded-2xl border border-dashed border-ink/15 bg-white/40 p-4 text-center">
       <p className="text-[0.82rem] font-bold text-ink-soft">
@@ -399,7 +437,7 @@ function EmptyLessons({
       </p>
       <motion.button
         whileTap={busy || !hasItems ? undefined : { scale: 0.98 }}
-        onClick={onCreate}
+        onClick={() => onCreate(nextLesson)}
         disabled={busy || !hasItems}
         className="btn btn-primary mt-3 w-full py-2.5 text-[0.82rem] disabled:opacity-45"
         style={{ backgroundImage: `linear-gradient(135deg, ${accent}, ${accent}cc)` }}
@@ -407,6 +445,34 @@ function EmptyLessons({
         <Icon name="plus" className="size-3.5" />
         {busy ? "Đang tạo…" : `Tạo bài ${nextLesson}`}
       </motion.button>
+      {hasItems && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder="Hoặc nhập số bài khác"
+            className="field flex-1 py-1.5 text-[0.78rem]"
+            style={{ minHeight: 0 }}
+          />
+          <button
+            type="button"
+            disabled={busy || !custom}
+            onClick={() => {
+              const n = Number(custom);
+              if (Number.isFinite(n) && n > 0) {
+                onCreate(n);
+                setCustom("");
+              }
+            }}
+            className="btn btn-cyan px-2.5 py-1.5 text-[0.74rem] disabled:opacity-40"
+          >
+            Tạo
+          </button>
+        </div>
+      )}
     </div>
   );
 }
